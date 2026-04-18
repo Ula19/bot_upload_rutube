@@ -1,0 +1,85 @@
+services:
+  # Наш бот
+  bot:
+    build: .
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      # URL Local Bot API (контейнер bot-api) — файлы до 2 ГБ
+      BOT_API_URL: http://bot-api:8081
+    depends_on:
+      postgres:
+        condition: service_healthy
+      bot-api:
+        condition: service_started
+      warp:
+        condition: service_healthy
+    volumes:
+      # tmp для скачанных видео (не занимает место в контейнере)
+      - /tmp/rutube_bot:/tmp/rutube_bot
+      # доступ к файлам Local Bot API
+      - bot-api-data:/var/lib/telegram-bot-api
+      # Docker socket — для перезапуска WARP при блокировке IP
+      - /var/run/docker.sock:/var/run/docker.sock
+
+
+  # Local Bot API — файлы до 2 ГБ без ограничений
+  bot-api:
+    image: aiogram/telegram-bot-api:latest
+    restart: unless-stopped
+    environment:
+      TELEGRAM_API_ID: ${API_ID}
+      TELEGRAM_API_HASH: ${API_HASH}
+      TELEGRAM_LOCAL: 1
+    ports:
+      - "${BOT_API_PORT:-8081}:8081"
+    volumes:
+      - bot-api-data:/var/lib/telegram-bot-api
+      - /tmp/rutube_bot:/tmp/rutube_bot
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8081/ || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  # Cloudflare WARP — VPN для обхода гео-блокировки Rutube вне РФ
+  warp:
+    image: ghcr.io/mon-ius/docker-warp-socks:v5
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "curl -x socks5://127.0.0.1:9091 -s --max-time 5 https://www.cloudflare.com/cdn-cgi/trace | grep -q warp=on"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+
+  # Автоперезапуск unhealthy контейнеров (особенно WARP)
+  autoheal:
+    image: willfarrell/autoheal:latest
+    restart: unless-stopped
+    environment:
+      AUTOHEAL_CONTAINER_LABEL: all
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+
+  # PostgreSQL
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${DB_NAME:-bot_4_rutube}
+      POSTGRES_USER: ${DB_USER:-bot_user}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-changeme}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-bot_user} -d ${DB_NAME:-bot_4_rutube}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
+volumes:
+  postgres-data:
+  bot-api-data:
