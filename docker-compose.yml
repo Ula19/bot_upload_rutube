@@ -36,12 +36,6 @@ services:
     volumes:
       - bot-api-data:/var/lib/telegram-bot-api
       - /tmp/rutube_bot:/tmp/rutube_bot
-    healthcheck:
-      test: ["CMD-SHELL", "curl -sf http://localhost:8081/ || exit 1"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-      start_period: 10s
 
   # Cloudflare WARP — VPN для обхода гео-блокировки Rutube вне РФ
   warp:
